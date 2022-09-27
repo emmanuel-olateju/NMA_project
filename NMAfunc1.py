@@ -33,6 +33,8 @@ class researchParam:
 '''
 def region_spks_extractor(sessions_data,area_index,a_p,pre_post_all,delay):
   '''
+  Extracts data of neurons of region given by area_index across all sessions and returns 
+  it as an array accompanied with a list of neurons present in these areas.
     sessions_data=> alldata
     area_index=> index no of desired brain_area in brain_groups list
     a_p=> 'a' for active trials
@@ -69,23 +71,25 @@ def region_spks_extractor(sessions_data,area_index,a_p,pre_post_all,delay):
   return area_session_spks, session_areas
 
 def get_region_neurons_in_session_index(session_data,area_index):
+  '''
+  returns a list of all neurons present in region denoted by area_index in given session_data
+  '''
   index_of_neurons_region=list()
   for area in range(session_data['brain_area'].shape[0]):
     if session_data['brain_area'][area] in brain_groups[area_index]:
       index_of_neurons_region.append(area)
   return index_of_neurons_region
 
-def bi_region_spks_extractor(sessions_data,area1_index,area2_index,a_p,l):
+def bi_region_spks_extractor(sessions_data,area1_index,area2_index,a_p,l=250):
   '''
+  Returns two arrays consisting of neural data from regions denoted by area1_index, area2_index respectively 
+  consisting of only instances of trials having valid recordings for both regions
     sessions_data=> alldata
     area1_index=> index no of 1st desired brain_area
     area2_index+> index no of 2nd desired brain area
     a_p=> 'a' for active trials
           'p' for passive trials
-    pre_post_all=> -1 for pre-stimulus
-                    0 for post-stimulus
-                    1 for whole time bin
-    delay=> no of time bin delay, 1 time bin corresponds to 10ms delay
+    l=> no of time bins to extract
     
   '''
   if a_p == 'a':
@@ -205,14 +209,6 @@ def regions_activity_similarity_contest(region1_spks,region2_spks,delays,t0,t1,a
         ttest_results,
         regions_activity_ttest([region1_activity,activity], ttest_method)
         ))
-  # actv_spks = partition_sessions_timebin(region2_spks[0],t2,t3)
-  # psv_spks = partition_sessions_timebin(region2_spks[1],t2,t3)
-  # activity = activity_method(active_data=actv_spks, passive_data=psv_spks, plot=False)
-  # ttest_results = np.vstack((
-  #         ttest_results,
-  #         regions_activity_ttest([region1_activity,activity], ttest_method)
-  #         ))
-  # delay_list.append(delay_list[-1]+10)
   ttest_results=pd.DataFrame(ttest_results, columns=['statistics', 'p-value'])
   ttest_results['delays']=delay_list
   return ttest_results
