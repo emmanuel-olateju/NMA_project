@@ -6,7 +6,7 @@ import scipy.stats as stats
 import scipy.integrate as integrate
 import math
 import statistics as st
-from sklearn.cross_decomposition import CCA
+from sklearn.cross_decomposition import CCA, PLSRegression
 from sklearn.metrics import auc, r2_score, explained_variance_score, mean_squared_error
 
 from LCC import *
@@ -27,6 +27,27 @@ class researchParam:
   def __init__(self):
     self.param=dict()
     self.saved_trans=dict()
+
+
+'''
+  PLOTTING METHODS
+'''
+def CCA_cluster_plot(research,delays):
+  for i in range(research.shape[0]):
+    sns.clustermap(pd.DataFrame(research[i,:,:], index=['mean','var','energy','pre_ei'], columns=delays),annot=True, figsize=(20,6))
+
+def CCA_metric_plot(df,R=False):
+  plt.figure(figsize=(15,5))
+  if R==True:
+    sns.lineplot(x='delay',y='R_squared',data=df,color='hotpink')
+  sns.lineplot(x='delay',y='mean',data=df,color='indigo')
+  sns.lineplot(x='delay',y='var',data=df,color='steelblue')
+  sns.lineplot(x='delay',y='energy',data=df,color='mediumseagreen')
+  sns.lineplot(x='delay',y='pre_ei',data=df,color='dimgrey')
+  if R==True:
+    plt.legend(['R_squared','mean','var','energy','pre_ei'])
+  else:
+    plt.legend(['mean','var','energy','pre_ei'])
 
 '''
   DATA EXTRACTORS
@@ -506,11 +527,62 @@ def ei_analysis_pipeline(active_data,passive_data,plot=False):
     ei_plot(active_ei, passive_ei)
   return (active_ei, passive_ei)
 
+def bi_region_activity_extractor(stein,actv,psv,t1,t2):
+
+  '''
+    actv[0]=bg_actv
+    actv[1]=or_actv
+    psv[0]=bg_psv
+    psv[1]=or_psv
+    t1=delay start
+    t2=delay end
+  '''
+
+  global partition_sessions_timebin,partition_session_timebin
+  #bg spks extraction
+  bg_actv_pre_spks = partition_sessions_timebin(actv[0],50,250)
+  bg_psv_pre_spks = partition_sessions_timebin(psv[0],50,250)
+  bg_actv_post_spks = partition_sessions_timebin(actv[0],500,2500)
+  bg_psv_post_spks = partition_sessions_timebin(psv[0],500,2500)
+
+  #or spks extraction
+  or_actv_pre_spks_d = partition_sessions_timebin(actv[1],t1,t2)
+  or_psv_pre_spks_d = partition_sessions_timebin(psv[1],t1,t2)
+  or_actv_post_spks = partition_sessions_timebin(actv[1],500,2500)
+  or_psv_post_spks = partition_sessions_timebin(psv[1],500,2500)
+
+  ##region variant construction
+  #bg region
+  bg_MVE, bg_Y = CCA_parameters_pipeline(
+  bg_actv_pre_spks,
+  bg_psv_pre_spks,
+  20,
+  bg_actv_post_spks,
+  bg_psv_post_spks,
+  200,
+  stein
+  )
+  bg = np.hstack((bg_MVE,bg_Y))
+  #or region
+  or_d_MVE, or_d_Y = CCA_parameters_pipeline(
+      or_actv_pre_spks_d,
+      or_psv_pre_spks_d,
+      20,
+      or_actv_post_spks,
+      or_psv_post_spks,
+      200,
+      stein
+  )
+  or_ = np.hstack((or_d_MVE, or_d_Y))
+
+  return bg,or_
+
 def get_sessions_feedback(active_data,passive_data,stein,length):
   global combine_region_sessions_data
   _, y1 = combine_region_sessions_data(active_data,stein,1,length)
   _, y2 = combine_region_sessions_data(passive_data,stein,0,length)
   return y1+y2
+
 
 #CCA
 def CCA_parameters_pipeline(active_data, passive_data, pre_length, post_active_data, post_passive_data, post_length, stein):
@@ -651,45 +723,6 @@ def bi_region_CCA_analysis(stein,actv,psv,t1,t2):
 
   return bg,or_,Y_pred,R_squared,mean_R_squared,var_R_squared,energy_R_squared,pre_ei_R_squared
 
-# pipeline result analysis
-# def cca_cor_plot(bg_or_pred,bg,or_,Y_pred=None):
-#   if bg_or_pred==1:
-#     cca_df = pd.DataFrame({
-#       'or_mean_c': Y_pred[:,0],
-#       'or_var_c': Y_pred[:,1],
-#       'or_energy_c': Y_pred[:,2],
-#       'or_pre_ei_c': Y_pred[:,4],
-#       'or_post_ei_c': Y_pred[:,5],
-#       'bg_mean': bg[:,0],
-#       'bg_var': bg[:,1],
-#       'bg_energy': bg[:,2],
-#       'bg_pre_ei': bg[:,4],
-#       'bg_post_ei': bg[:,5]
-#   })
-#   else:
-#     cca_df = pd.DataFrame({
-#         'or_mean': or_[:,0],
-#         'or_var': or_[:,1],
-#         'or_energy': or_[:,2],
-#         'or_pre_ei': or_[:,4],
-#         'or_post_ei': or_[:,5],
-#         'bg_mean': bg[:,0],
-#         'bg_var': bg[:,1],
-#         'bg_energy': bg[:,2],
-#         'bg_pre_ei': bg[:,4],
-#         'bg_post_ei': bg[:,5]
-#     })
-  
-  # corr_cca_df=cca_df.corr(method='pearson')
-
-  # plt.figure(figsize=(15,12))
-  # cca_df_lt = corr_cca_df.where(np.tril(np.ones(corr_cca_df.shape)).astype(np.bool))
-  # sns.heatmap(cca_df_lt,cmap="coolwarm",annot=True,fmt='.1g')
-  # plt.tight_layout()
-  # plt.savefig("Heatmap_Canonical_Correlates_from_X_and_data.jpg",
-  #                     format='jpeg',
-  #                     dpi=100)
-
 #pearson
 def bi_region_time_pearson_test_pipeline(region1,region2,delays,std,plot,t0=50,t1=250,t2=500,t3=2500):
   research_param=researchParam()
@@ -725,35 +758,6 @@ def bi_region_time_pearson_test_pipeline(region1,region2,delays,std,plot,t0=50,t
     pearson_stats.loc[len(pearson_stats)]=[td, avar,amean,a_qtile,a_99pile,a_30pile, a_20pile, a_10pile,'actv']
     pearson_stats.loc[len(pearson_stats)]=[td, pvar,pmean,p_qtile,p_99pile,p_30pile, p_20pile, p_10pile,'psv']
 
-
-  # rgn1_actv=partition_sessions_timebin(region1[0],t2,t3)
-  # rgn2_actv=partition_sessions_timebin(region2[0],t2,t3)
-  # rgn1_psv=partition_sessions_timebin(region1[1],t2,t3)
-  # rgn2_psv=partition_sessions_timebin(region2[1],t2,t3)
-
-  # actv_r=bi_region_corr_coef([rgn1_actv,rgn2_actv]).tolist()
-  # a=['actv']*len(actv_r)
-  # d=[td+10]*len(actv_r)
-  # psv_r=bi_region_corr_coef([rgn1_psv,rgn2_psv]).tolist()
-  # p=['psv']*len(psv_r)
-  # d = d + [td+10]*len(psv_r)
-  # df=pd.DataFrame(columns=['delay','area','a_p'])
-  # df['delay']=d
-  # df['pearson']=actv_r+psv_r
-  # df['a_p']=a+p
-  # cdf=pd.DataFrame(columns=['delay','pearson','a_p'])
-  # pearson = pd.concat([pearson,df])
-
-  # avar=np.nanvar(actv_r)
-  # pvar=np.nanvar(psv_r)
-  # amean=np.nanmean(actv_r)
-  # pmean=np.nanmean(psv_r)
-  # a_qtile,a_99pile,a_30pile, a_20pile, a_10pile = (np.nanquantile(actv_r,0.5),np.nanpercentile(actv_r,99),np.nanpercentile(actv_r,30), np.nanpercentile(actv_r,20), np.nanpercentile(actv_r,10))
-  # p_qtile,p_99pile,p_30pile, p_20pile, p_10pile = (np.nanquantile(psv_r,0.5),np.nanpercentile(psv_r,99),np.nanpercentile(psv_r,30), np.nanpercentile(psv_r,20), np.nanpercentile(psv_r,10)) 
-  # pearson_stats.loc[len(pearson_stats)]=[td+10, avar,amean,a_qtile,a_99pile,a_30pile, a_20pile, a_10pile,'actv']
-  # pearson_stats.loc[len(pearson_stats)]=[td+10, pvar,pmean,p_qtile,p_99pile,p_30pile, p_20pile, p_10pile,'psv']
-
-
   research_param.param['pearson']=pearson
   research_param.param['pearson_stats']=pearson_stats
 
@@ -767,9 +771,6 @@ def bi_region_time_pearson_test_pipeline(region1,region2,delays,std,plot,t0=50,t
 
   return research_param
 
-'''
-  TO BE ARRANGED LATER
-'''
 def bi_region_lcc_pipeline(r1, r2, delays,t0=50,t1=250,t2=500,t3=2500):
 
   research_param=researchParam()
@@ -789,17 +790,6 @@ def bi_region_lcc_pipeline(r1, r2, delays,t0=50,t1=250,t2=500,t3=2500):
     ))
     lcc=LCC_param([re1,re2])
     linearity_df.loc[len(linearity_df)]=[td,lcc._linearity]
-
-  # re1=np.vstack((
-  #   combine_arr_in_list(partition_sessions_timebin(r1[0],t2,t3)),
-  #   combine_arr_in_list(partition_sessions_timebin(r1[1],t2,t3))
-  # ))
-  # re2=np.vstack((
-  #   combine_arr_in_list(partition_sessions_timebin(r2[0],t2,t3)),
-  #   combine_arr_in_list(partition_sessions_timebin(r2[1],t2,t3))
-  # ))
-  # lcc=LCC_param([re1,re2])
-  # linearity_df.loc[len(linearity_df)]=[td+10,lcc._linearity]
 
   research_param.param['linearity']=linearity_df
 
@@ -832,19 +822,34 @@ def bi_region_CCA_pipeline(stein,r1, r2, delays,t0=50,t1=250,t2=500,t3=2500):
   
   return research_param
 
-def CCA_cluster_plot(research,delays):
-  for i in range(research.shape[0]):
-    sns.clustermap(pd.DataFrame(research[i,:,:], index=['mean','var','energy','pre_ei'], columns=delays),annot=True, figsize=(20,6))
+'''
+  TO BE ARRANGED LATER
+'''
+def bi_region_PLS(stein,r1,r2,delays,t0=50,t1=250):
 
-def CCA_metric_plot(df,R=False):
-  plt.figure(figsize=(15,5))
-  if R==True:
-    sns.lineplot(x='delay',y='R_squared',data=df,color='hotpink')
-  sns.lineplot(x='delay',y='mean',data=df,color='indigo')
-  sns.lineplot(x='delay',y='var',data=df,color='steelblue')
-  sns.lineplot(x='delay',y='energy',data=df,color='mediumseagreen')
-  sns.lineplot(x='delay',y='pre_ei',data=df,color='dimgrey')
-  if R==True:
-    plt.legend(['R_squared','mean','var','energy','pre_ei'])
-  else:
-    plt.legend(['mean','var','energy','pre_ei'])
+  global PLSRegression
+
+  delay_list=[d for d in delays]
+
+  scores=list()
+
+  for td in delay_list:
+    r1_,r2_ = bi_region_activity_extractor(stein, (r1[0],r2[0]), (r1[1],r2[1]), t0+td, t1+td)
+    model=PLSRegression()
+    model.fit(r1_,r2_)
+    scores.append(model.score(r1_,r2_))
+
+  return scores
+
+def OTA_regions_PLS_analysis(stein,iri,oris,delays):
+  scores_array=np.empty((0,len(delays)))
+  for i,ori in enumerate(oris):
+    r1_actv_, r2_actv_ = bi_region_spks_extractor(stein,iri,ori,'a')
+    r1_psv_, r2_psv_ = bi_region_spks_extractor(stein,iri,ori,'p')
+
+    scores_array=np.vstack((scores_array,np.array(bi_region_PLS(stein, (r1_actv_,r1_psv_), (r2_actv_,r2_psv_), delays))))
+    print(i)
+    del r1_actv_,r1_psv_,r2_actv_,r2_psv_
+
+  return scores_array
+  
